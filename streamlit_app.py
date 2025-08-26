@@ -5,10 +5,12 @@ from uuid import uuid4
 
 import streamlit as st
 import httpx
-from a2a.client import A2ACardResolver, ClientConfig, ClientFactory, create_text_message_object
+from a2a.client import A2ACardResolver, A2AClient
 from a2a.types import (
     AgentCard,
-    TransportProtocol,
+    MessageSendParams,
+    SendMessageRequest,
+    SendStreamingMessageRequest,
 )
 from a2a.utils.constants import (
     AGENT_CARD_WELL_KNOWN_PATH,
@@ -48,7 +50,7 @@ with st.sidebar:
 
     base_url = st.text_input(
         "Agent Base URL",
-        value="http://localhost:10001",
+        value="http://localhost:10000",
         help="The base URL of your A2A agent server"
     )
 
@@ -145,78 +147,82 @@ async def send_message_to_agent(
     """Send a message to the agent and get the response."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as httpx_client:
+            client = A2AClient(
+                httpx_client=httpx_client,
+                agent_card=agent_card
+            )
+
+            send_message_payload: Dict[str, Any] = {
+                'message': {
+                    'role': 'user',
+                    'parts': [{'kind': 'text', 'text': message}],
+                    'message_id': uuid4().hex,
+                },
+            }
+
+            if context_id:
+                send_message_payload['message']['context_id'] = context_id
+            if task_id:
+                send_message_payload['message']['task_id'] = task_id
+
             if auth_token:
                 httpx_client.headers["Authorization"] = f"Bearer {auth_token}"
-                
-            config = ClientConfig(
-                httpx_client=httpx_client,
-                supported_transports=[
-                    TransportProtocol.jsonrpc,
-                    TransportProtocol.http_json,
-                ],
-            )
-            client_factory = ClientFactory(config)
-            client = client_factory.create(agent_card)
 
-            # Create message object using the new API
-            message_obj = create_text_message_object(content=message)
-            
-            # Add context_id and task_id if provided
-            if context_id:
-                message_obj.context_id = context_id
-            if task_id:
-                message_obj.task_id = task_id
+            if streaming:
+                request = SendStreamingMessageRequest(
+                    id=str(uuid4()),
+                    params=MessageSendParams(**send_message_payload)
+                )
 
-            # Send message and collect responses
-            responses = []
-            collected_text = []
-            final_task = None
-            
-            async for event in client.send_message(message_obj):
-                responses.append(event)
-                
-                # Handle different event types
-                if hasattr(event, '__iter__') and not isinstance(event, str):
-                    # It's a tuple (task, event_type)
-                    task, event_type = event
-                    final_task = task
-                    
-                    # Extract text from artifacts if available
-                    if hasattr(task, 'artifacts') and task.artifacts:
-                        for artifact in task.artifacts:
-                            if hasattr(artifact, 'parts') and artifact.parts:
-                                for part in artifact.parts:
-                                    if hasattr(part, 'root') and hasattr(part.root, 'text'):
-                                        collected_text.append(part.root.text)
-                else:
-                    # Handle other response types (like Message objects)
-                    final_task = event
-                    if hasattr(event, 'parts'):
-                        for part in event.parts:
-                            if hasattr(part, 'text'):
-                                collected_text.append(part.text)
+                response_parts = []
+                collected_text = []
+                final_response = None
 
-            # Format response similar to old API
-            if final_task:
-                result = {
-                    'result': {
-                        'id': getattr(final_task, 'id', None),
-                        'context_id': getattr(final_task, 'context_id', context_id),
-                        'status': {
-                            'state': getattr(getattr(final_task, 'status', None), 'state', 'completed')
-                        }
-                    }
-                }
-                
-                # Add artifacts with collected text
-                if collected_text:
-                    result['result']['artifacts'] = [{
-                        'parts': [{'text': '\n'.join(collected_text)}]
-                    }]
-                
-                return result
-            
-            return {"error": "No response received"}
+                async for chunk in client.send_message_streaming(request):
+                    response_parts.append(chunk)
+                    chunk_data = chunk.model_dump(
+                        mode='json', exclude_none=True)
+
+                    # Extract text from streaming chunks
+                    if 'result' in chunk_data:
+                        result = chunk_data['result']
+
+                        # Check for text in status message (working state)
+                        status = result.get('status', {})
+                        if 'message' in status:
+                            status_message = status['message']
+                            parts = status_message.get('parts', [])
+                            for part in parts:
+                                if 'text' in part:
+                                    collected_text.append(part['text'])
+
+                        # Keep the last chunk as final response for metadata
+                        final_response = chunk_data
+
+                if final_response:
+                    # Add collected text to the final response
+                    if collected_text:
+                        # Ensure we have a proper structure for the text
+                        if 'result' not in final_response:
+                            final_response['result'] = {}
+                        if 'artifacts' not in final_response['result']:
+                            final_response['result']['artifacts'] = []
+
+                        # Add collected text as an artifact
+                        final_response['result']['artifacts'].append({
+                            'parts': [{'text': '\n'.join(collected_text)}]
+                        })
+
+                    return final_response
+                return {"error": "No response received"}
+            else:
+                request = SendMessageRequest(
+                    id=str(uuid4()),
+                    params=MessageSendParams(**send_message_payload)
+                )
+
+                response = await client.send_message(request)
+                return response.model_dump(mode='json', exclude_none=True)
 
     except Exception as e:
         logger.error(f"Failed to send message: {e}")
@@ -257,85 +263,106 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
             async def stream_response(collected_text_ref):
                 try:
                     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as httpx_client:
+                        client = A2AClient(
+                            httpx_client=httpx_client,
+                            agent_card=st.session_state.agent_card
+                        )
+
+                        send_message_payload = {
+                            'message': {
+                                'role': 'user',
+                                'parts': [{'kind': 'text', 'text': prompt}],
+                                'message_id': uuid4().hex,
+                            },
+                        }
+
+                        if st.session_state.context_id:
+                            send_message_payload['message']['context_id'] = st.session_state.context_id
+                        if st.session_state.task_id:
+                            send_message_payload['message']['task_id'] = st.session_state.task_id
+
                         if auth_token:
                             httpx_client.headers["Authorization"] = f"Bearer {auth_token}"
-                            
-                        config = ClientConfig(
-                            httpx_client=httpx_client,
-                            supported_transports=[
-                                TransportProtocol.jsonrpc,
-                                TransportProtocol.http_json,
-                            ],
-                        )
-                        client_factory = ClientFactory(config)
-                        client = client_factory.create(st.session_state.agent_card)
 
-                        # Create message object using the new API
-                        message_obj = create_text_message_object(content=prompt)
-                        
-                        # Add context_id and task_id if provided
-                        if st.session_state.context_id:
-                            message_obj.context_id = st.session_state.context_id
-                        if st.session_state.task_id:
-                            message_obj.task_id = st.session_state.task_id
+                        request = SendStreamingMessageRequest(
+                            id=str(uuid4()),
+                            params=MessageSendParams(**send_message_payload)
+                        )
 
                         final_result = None
-                        current_content = ""
-                        
-                        async for event in client.send_message(message_obj):
-                            # Handle tuple events (task, event_object)
-                            if isinstance(event, tuple) and len(event) == 2:
-                                task, event_obj = event
-                                final_result = task
-                                
-                                # Update session state with task info
-                                if hasattr(task, 'context_id') and task.context_id:
-                                    st.session_state.context_id = task.context_id
-                                if hasattr(task, 'id') and task.id:
-                                    st.session_state.task_id = task.id
-                                
-                                # Check event kind to handle different types
-                                if hasattr(event_obj, 'kind'):
-                                    
-                                    # Handle status updates (working progress)
-                                    if event_obj.kind == 'status-update' and hasattr(event_obj, 'status'):
-                                        status = event_obj.status
-                                        if (hasattr(status, 'state') and status.state.value == 'working' and 
-                                            hasattr(status, 'message') and status.message):
-                                            # Extract status message text
-                                            message = status.message
-                                            if hasattr(message, 'parts') and message.parts:
-                                                for part in message.parts:
-                                                    if hasattr(part, 'root') and hasattr(part.root, 'text'):
-                                                        status_text = part.root.text
-                                                        # Show status as italic
-                                                        collected_text_ref.append(f"*{status_text}*")
-                                                        message_placeholder.markdown('\n\n'.join(collected_text_ref))
-                                    
-                                    # Handle artifact updates (final/intermediate results)
-                                    elif event_obj.kind == 'artifact-update' and hasattr(event_obj, 'artifact'):
-                                        artifact = event_obj.artifact
-                                        if hasattr(artifact, 'parts') and artifact.parts:
-                                            for part in artifact.parts:
-                                                if hasattr(part, 'root') and hasattr(part.root, 'text'):
-                                                    result_text = part.root.text
-                                                    # Add final result
-                                                    collected_text_ref.append(result_text)
-                                                    message_placeholder.markdown('\n\n'.join(collected_text_ref))
-                                
-                            else:
-                                # Handle Message objects directly
-                                final_result = event
-                                if hasattr(event, 'parts') and event.parts:
-                                    for part in event.parts:
-                                        if hasattr(part, 'root') and hasattr(part.root, 'text'):
-                                            collected_text_ref.clear()
-                                            collected_text_ref.append(part.root.text)
-                                            message_placeholder.markdown(part.root.text)
-                                        elif hasattr(part, 'text'):
-                                            collected_text_ref.clear()
-                                            collected_text_ref.append(part.text)
-                                            message_placeholder.markdown(part.text)
+                        async for chunk in client.send_message_streaming(request):
+                            chunk_data = chunk.model_dump(
+                                mode='json', exclude_none=True)
+
+                            if 'result' in chunk_data:
+                                result = chunk_data['result']
+                                final_result = result
+
+                                # Update context and task IDs (handle both camelCase and snake_case)
+                                if 'contextId' in result:
+                                    st.session_state.context_id = result['contextId']
+                                elif 'context_id' in result:
+                                    st.session_state.context_id = result['context_id']
+
+                                if 'taskId' in result:
+                                    st.session_state.task_id = result['taskId']
+                                elif 'id' in result:
+                                    st.session_state.task_id = result['id']
+
+                                # Check the kind of update
+                                kind = result.get('kind', '')
+
+                                # Handle artifact-update events (contains the final answer)
+                                if kind == 'artifact-update':
+                                    artifact = result.get('artifact', {})
+                                    parts = artifact.get('parts', [])
+                                    for part in parts:
+                                        if part.get('kind') == 'text' or 'text' in part:
+                                            text = part.get('text', '')
+                                            if text:
+                                                # Append final answer to existing messages
+                                                collected_text_ref.append(text)
+                                                # Display all messages with each on a new line
+                                                message_placeholder.markdown(
+                                                    '\n\n'.join(collected_text_ref))
+
+                                # Handle status-update events
+                                elif kind == 'status-update':
+                                    status = result.get('status', {})
+                                    state = status.get('state', '')
+
+                                    if state == 'working' and 'message' in status:
+                                        # Extract text from working state messages
+                                        status_message = status['message']
+                                        parts = status_message.get('parts', [])
+                                        for part in parts:
+                                            if part.get('kind') == 'text' or 'text' in part:
+                                                text = part.get('text', '')
+                                                if text:
+                                                    collected_text_ref.append(
+                                                        text)
+                                                    # Update display with all collected text
+                                                    message_placeholder.markdown(
+                                                        '\n\n'.join(collected_text_ref))
+
+                                    elif state == 'input-required' and 'message' in status:
+                                        # Handle input required state
+                                        status_message = status['message']
+                                        parts = status_message.get('parts', [])
+                                        for part in parts:
+                                            if part.get('kind') == 'text' or 'text' in part:
+                                                text = part.get('text', '')
+                                                if text and text not in collected_text_ref:
+                                                    collected_text_ref.append(
+                                                        text)
+                                                    # Update display
+                                                    message_placeholder.markdown(
+                                                        '\n\n'.join(collected_text_ref))
+
+                                    elif state == 'completed':
+                                        # Task is completed, final answer should have been in artifact-update
+                                        # If no artifact was sent, keep the working messages
+                                        pass
 
                         return final_result
 
@@ -410,13 +437,9 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
 
                         if state == 'input-required' and 'message' in status:
                             # Extract message from status when input is required
-                            st.write(f"Debug - Found input-required state")
-                            st.write(f"Debug - Status: {status}")
                             status_message = status['message']
                             parts = status_message.get('parts', [])
-                            st.write(f"Debug - Parts: {parts}")
                             for part in parts:
-                                st.write(f"Debug - Part: {part}")
                                 if 'text' in part:
                                     assistant_message = part['text']
                                     st.markdown(assistant_message)
