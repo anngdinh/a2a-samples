@@ -113,9 +113,22 @@ async def fetch_agent_card(base_url: str, auth_token: str = "") -> Optional[Agen
 
             logger.info(
                 f"Fetching agent card from: {base_url}{AGENT_CARD_WELL_KNOWN_PATH}")
-            public_card = await resolver.get_agent_card()
+            
+            public_card = None
+            try:
+                public_card = await resolver.get_agent_card()
+            except Exception as e:
+                logger.warning(f"Failed to fetch from {AGENT_CARD_WELL_KNOWN_PATH}, trying /.well-known/agent.json")
+                try:
+                    public_card = await resolver.get_agent_card(
+                        relative_card_path="/.well-known/agent.json"
+                    )
+                    logger.info("Successfully fetched agent card from /.well-known/agent.json")
+                except Exception as fallback_e:
+                    logger.error(f"Failed to fetch from both paths: {fallback_e}")
+                    raise
 
-            if public_card.supports_authenticated_extended_card and auth_token:
+            if public_card and public_card.supports_authenticated_extended_card and auth_token:
                 try:
                     auth_headers = {"Authorization": f"Bearer {auth_token}"}
                     extended_card = await resolver.get_agent_card(
