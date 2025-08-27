@@ -113,19 +113,22 @@ async def fetch_agent_card(base_url: str, auth_token: str = "") -> Optional[Agen
 
             logger.info(
                 f"Fetching agent card from: {base_url}{AGENT_CARD_WELL_KNOWN_PATH}")
-            
+
             public_card = None
             try:
                 public_card = await resolver.get_agent_card()
             except Exception as e:
-                logger.warning(f"Failed to fetch from {AGENT_CARD_WELL_KNOWN_PATH}, trying /.well-known/agent.json")
+                logger.warning(
+                    f"Failed to fetch from {AGENT_CARD_WELL_KNOWN_PATH}, trying /.well-known/agent.json")
                 try:
                     public_card = await resolver.get_agent_card(
                         relative_card_path="/.well-known/agent.json"
                     )
-                    logger.info("Successfully fetched agent card from /.well-known/agent.json")
+                    logger.info(
+                        "Successfully fetched agent card from /.well-known/agent.json")
                 except Exception as fallback_e:
-                    logger.error(f"Failed to fetch from both paths: {fallback_e}")
+                    logger.error(
+                        f"Failed to fetch from both paths: {fallback_e}")
                     raise
 
             if public_card and public_card.supports_authenticated_extended_card and auth_token:
@@ -271,9 +274,9 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
         if streaming_mode:
             # Streaming mode - display responses in real-time
             message_placeholder = st.empty()
-            collected_text = []
+            final_answer = ""
 
-            async def stream_response(collected_text_ref):
+            async def stream_response():
                 try:
                     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as httpx_client:
                         client = A2AClient(
@@ -302,99 +305,65 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                             params=MessageSendParams(**send_message_payload)
                         )
 
-                        final_result = None
+                        streaming_text = ""
+                        final_text = ""
+
                         async for chunk in client.send_message_streaming(request):
                             chunk_data = chunk.model_dump(
                                 mode='json', exclude_none=True)
 
                             if 'result' in chunk_data:
                                 result = chunk_data['result']
-                                final_result = result
 
-                                # Update context and task IDs (handle both camelCase and snake_case)
-                                if 'contextId' in result:
-                                    st.session_state.context_id = result['contextId']
-                                elif 'context_id' in result:
-                                    st.session_state.context_id = result['context_id']
+                                # Update IDs
+                                for id_key in ['contextId', 'context_id']:
+                                    if id_key in result:
+                                        st.session_state.context_id = result[id_key]
 
-                                if 'taskId' in result:
-                                    st.session_state.task_id = result['taskId']
-                                elif 'id' in result:
-                                    st.session_state.task_id = result['id']
+                                for id_key in ['taskId', 'id']:
+                                    if id_key in result:
+                                        st.session_state.task_id = result[id_key]
 
-                                # Check the kind of update
                                 kind = result.get('kind', '')
 
-                                # Handle artifact-update events (contains the final answer)
+                                # Final answer in artifact
                                 if kind == 'artifact-update':
                                     artifact = result.get('artifact', {})
-                                    parts = artifact.get('parts', [])
-                                    for part in parts:
-                                        if part.get('kind') == 'text' or 'text' in part:
-                                            text = part.get('text', '')
-                                            if text:
-                                                # Append final answer to existing messages
-                                                collected_text_ref.append(text)
-                                                # Display all messages with each on a new line
-                                                message_placeholder.markdown(
-                                                    '\n\n'.join(collected_text_ref))
+                                    for part in artifact.get('parts', []):
+                                        if 'text' in part:
+                                            final_text = part['text']
+                                            message_placeholder.markdown(
+                                                final_text)
 
-                                # Handle status-update events
+                                # Streaming text from status updates
                                 elif kind == 'status-update':
                                     status = result.get('status', {})
-                                    state = status.get('state', '')
-
-                                    if state == 'working' and 'message' in status:
-                                        # Extract text from working state messages
-                                        status_message = status['message']
-                                        parts = status_message.get('parts', [])
-                                        for part in parts:
-                                            if part.get('kind') == 'text' or 'text' in part:
-                                                text = part.get('text', '')
-                                                if text:
-                                                    collected_text_ref.append(
-                                                        text)
-                                                    # Update display with all collected text
+                                    if 'message' in status:
+                                        for part in status['message'].get('parts', []):
+                                            if 'text' in part:
+                                                text = part['text']
+                                                if not final_text:  # Only show streaming if no final answer yet
+                                                    streaming_text += text
                                                     message_placeholder.markdown(
-                                                        '\n\n'.join(collected_text_ref))
-
-                                    elif state == 'input-required' and 'message' in status:
-                                        # Handle input required state
-                                        status_message = status['message']
-                                        parts = status_message.get('parts', [])
-                                        for part in parts:
-                                            if part.get('kind') == 'text' or 'text' in part:
-                                                text = part.get('text', '')
-                                                if text and text not in collected_text_ref:
-                                                    collected_text_ref.append(
-                                                        text)
-                                                    # Update display
+                                                        streaming_text)
+                                                else:
+                                                    final_text = text
                                                     message_placeholder.markdown(
-                                                        '\n\n'.join(collected_text_ref))
+                                                        final_text)
 
-                                    elif state == 'completed':
-                                        # Task is completed, final answer should have been in artifact-update
-                                        # If no artifact was sent, keep the working messages
-                                        pass
-
-                        return final_result
+                        return final_text or streaming_text
 
                 except Exception as e:
                     if 'terminal state' in str(e) or 'completed' in str(e):
-                        # Reset task_id and retry
                         st.session_state.task_id = None
-                        collected_text_ref.clear()
-                        return await stream_response(collected_text_ref)
+                        return await stream_response()
                     else:
                         st.error(f"Error: {e}")
-                        return None
+                        return ""
 
             # Run streaming
-            final_result = asyncio.run(stream_response(collected_text))
-
-            # Save the final message
-            assistant_message = '\n\n'.join(
-                collected_text) if collected_text else "Response received (no text content)"
+            final_answer = asyncio.run(stream_response())
+            assistant_message = final_answer or "Response received (no text content)"
 
         else:
             # Non-streaming mode - original behavior
