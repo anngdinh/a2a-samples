@@ -100,9 +100,9 @@ with st.sidebar:
 
         st.divider()
         st.caption("📝 Current Conversation")
-        st.code(f"Context ID: {st.session_state.context_id[:8]}...")
+        st.code(f"Context ID: {st.session_state.context_id}")
         if st.session_state.task_id:
-            st.code(f"Task ID: {st.session_state.task_id[:8]}...")
+            st.code(f"Task ID: {st.session_state.task_id}")
     else:
         st.info("👆 Click Connect to establish connection")
 

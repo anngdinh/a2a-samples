@@ -120,14 +120,14 @@ async def main() -> None:
             },
         }
 
-        # # --8<-- [start:send_message]
-        # request = SendMessageRequest(
-        #     id=str(uuid4()), params=MessageSendParams(**send_message_payload)
-        # )
+        # --8<-- [start:send_message]
+        request = SendMessageRequest(
+            id=str(uuid4()), params=MessageSendParams(**send_message_payload)
+        )
 
-        # response = await client.send_message(request)
-        # print(response.model_dump(mode='json', exclude_none=True))
-        # # --8<-- [end:send_message]
+        response = await client.send_message(request)
+        print(response.model_dump(mode='json', exclude_none=True))
+        # --8<-- [end:send_message]
 
         # --8<-- [start:Multiturn]
         send_message_payload_multiturn: dict[str, Any] = {
@@ -172,17 +172,17 @@ async def main() -> None:
         print(second_response.model_dump(mode='json', exclude_none=True))
         # --8<-- [end:Multiturn]
 
-        # # --8<-- [start:send_message_streaming]
+        # --8<-- [start:send_message_streaming]
 
-        # streaming_request = SendStreamingMessageRequest(
-        #     id=str(uuid4()), params=MessageSendParams(**send_message_payload)
-        # )
+        streaming_request = SendStreamingMessageRequest(
+            id=str(uuid4()), params=MessageSendParams(**send_message_payload)
+        )
 
-        # stream_response = client.send_message_streaming(streaming_request)
+        stream_response = client.send_message_streaming(streaming_request)
 
-        # async for chunk in stream_response:
-        #     print(chunk.model_dump(mode='json', exclude_none=True))
-        # # --8<-- [end:send_message_streaming]
+        async for chunk in stream_response:
+            print(chunk.model_dump(mode='json', exclude_none=True))
+        # --8<-- [end:send_message_streaming]
 
 
 if __name__ == '__main__':
