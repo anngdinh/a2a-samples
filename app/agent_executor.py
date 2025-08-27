@@ -45,6 +45,8 @@ class CurrencyAgentExecutor(AgentExecutor):
             task = new_task(context.message)  # type: ignore
             await event_queue.enqueue_event(task)
         updater = TaskUpdater(event_queue, task.id, task.context_id)
+        
+        logger.info(f"Agent received - Context: {task.context_id}, Task: {task.id}, Query: {query}")
         try:
             async for item in self.agent.astream(query, task.context_id):
                 print("🔹", item)
