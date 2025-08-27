@@ -32,6 +32,7 @@ st.markdown("Chat with your agent using the A2A protocol")
 # Get URL parameters
 query_params = st.query_params
 default_agent_url = query_params.get("agent_url", "http://localhost:10000")
+default_streaming = query_params.get("streaming", "false").lower() == "true"
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -74,7 +75,7 @@ with st.sidebar:
 
     streaming_mode = st.checkbox(
         "Enable Streaming",
-        value=False,
+        value=default_streaming,
         help="Stream responses from the agent"
     )
 
