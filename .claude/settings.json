@@ -1,0 +1,10 @@
+{
+    "permissions": {
+        "deny": [
+            "Read(.env)",
+            "Write(.env)",
+            "Read(.gitignore)",
+            "Write(.gitignore)"
+        ]
+    }
+}
