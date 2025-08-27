@@ -49,7 +49,7 @@ class CurrencyAgentExecutor(AgentExecutor):
         logger.info(f"Agent received - Context: {task.context_id}, Task: {task.id}, Query: {query}")
         try:
             async for item in self.agent.astream(query, task.context_id):
-                print("🔹", item)
+                logger.info(f"🔹 {item}")
                 is_task_complete = item['is_task_complete']
                 require_user_input = item['require_user_input']
 
