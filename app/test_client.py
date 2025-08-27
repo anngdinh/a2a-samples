@@ -5,12 +5,10 @@ from uuid import uuid4
 
 import httpx
 
-from a2a.client import A2ACardResolver, A2AClient
+from a2a.client import A2ACardResolver, ClientConfig, ClientFactory, create_text_message_object
 from a2a.types import (
     AgentCard,
-    MessageSendParams,
-    SendMessageRequest,
-    SendStreamingMessageRequest,
+    TransportProtocol,
 )
 from a2a.utils.constants import (
     AGENT_CARD_WELL_KNOWN_PATH,
@@ -105,83 +103,82 @@ async def main() -> None:
                 'Failed to fetch the public agent card. Cannot continue.'
             ) from e
 
-        client = A2AClient(
-            httpx_client=httpx_client, agent_card=final_agent_card_to_use
+        # Create client using new ClientFactory API
+        config = ClientConfig(
+            httpx_client=httpx_client,
+            supported_transports=[TransportProtocol.jsonrpc]
         )
-        logger.info('A2AClient initialized.')
-
-        send_message_payload: dict[str, Any] = {
-            'message': {
-                'role': 'user',
-                'parts': [
-                    {'kind': 'text', 'text': 'how much is 10 USD in INR?'}
-                ],
-                'message_id': uuid4().hex,
-            },
-        }
+        factory = ClientFactory(config)
+        client = factory.create(final_agent_card_to_use)
+        logger.info('Client initialized using ClientFactory.')
 
         # --8<-- [start:send_message]
-        request = SendMessageRequest(
-            id=str(uuid4()), params=MessageSendParams(**send_message_payload)
+        message_obj = create_text_message_object(
+            content='how much is 10 USD in INR?'
         )
+        message_obj.message_id = uuid4().hex
 
-        response = await client.send_message(request)
-        print(response.model_dump(mode='json', exclude_none=True))
+        responses = []
+        async for event in client.send_message(message_obj):
+            responses.append(event)
+        
+        # Get the final result
+        if responses:
+            final_event = responses[-1]
+            if isinstance(final_event, tuple):
+                task = final_event[0]
+                print(task.model_dump(mode='json', exclude_none=True))
+            else:
+                print(final_event.model_dump(mode='json', exclude_none=True))
         # --8<-- [end:send_message]
 
         # --8<-- [start:Multiturn]
-        send_message_payload_multiturn: dict[str, Any] = {
-            'message': {
-                'role': 'user',
-                'parts': [
-                    {
-                        'kind': 'text',
-                        'text': 'How much is the exchange rate for 1 USD?',
-                    }
-                ],
-                'message_id': uuid4().hex,
-            },
-        }
-        request = SendMessageRequest(
-            id=str(uuid4()),
-            params=MessageSendParams(**send_message_payload_multiturn),
+        # First message: ambiguous question
+        first_message = create_text_message_object(
+            content='What is the exchange rate?'  # Ambiguous - missing currencies
         )
+        first_message.message_id = uuid4().hex
 
-        response = await client.send_message(request)
-        print(response.model_dump(mode='json', exclude_none=True))
+        first_responses = []
+        async for event in client.send_message(first_message):
+            first_responses.append(event)
+        
+        if first_responses:
+            first_task = first_responses[-1][0] if isinstance(first_responses[-1], tuple) else None
+            if first_task:
+                print(first_task.model_dump(mode='json', exclude_none=True))
+                
+                task_id = first_task.id
+                context_id = first_task.context_id
 
-        task_id = response.root.result.id
-        context_id = response.root.result.context_id
+                # Second message: provide clarification
+                second_message = create_text_message_object(
+                    content='USD to EUR'
+                )
+                second_message.message_id = uuid4().hex
+                second_message.task_id = task_id
+                second_message.context_id = context_id
 
-        second_send_message_payload_multiturn: dict[str, Any] = {
-            'message': {
-                'role': 'user',
-                'parts': [{'kind': 'text', 'text': 'CAD'}],
-                'message_id': uuid4().hex,
-                'task_id': task_id,
-                'context_id': context_id,
-            },
-        }
-
-        second_request = SendMessageRequest(
-            id=str(uuid4()),
-            params=MessageSendParams(**second_send_message_payload_multiturn),
-        )
-
-        second_response = await client.send_message(second_request)
-        print(second_response.model_dump(mode='json', exclude_none=True))
+                second_responses = []
+                async for event in client.send_message(second_message):
+                    second_responses.append(event)
+                
+                if second_responses:
+                    second_task = second_responses[-1][0] if isinstance(second_responses[-1], tuple) else None
+                    if second_task:
+                        print(second_task.model_dump(mode='json', exclude_none=True))
         # --8<-- [end:Multiturn]
 
         # --8<-- [start:send_message_streaming]
-
-        streaming_request = SendStreamingMessageRequest(
-            id=str(uuid4()), params=MessageSendParams(**send_message_payload)
+        streaming_message = create_text_message_object(
+            content='How much is 5 EUR in JPY?'
         )
+        streaming_message.message_id = uuid4().hex
 
-        stream_response = client.send_message_streaming(streaming_request)
-
-        async for chunk in stream_response:
-            print(chunk.model_dump(mode='json', exclude_none=True))
+        async for event in client.send_message(streaming_message):
+            if isinstance(event, tuple):
+                task = event[0]
+                print(task.model_dump(mode='json', exclude_none=True))
         # --8<-- [end:send_message_streaming]
 
 
