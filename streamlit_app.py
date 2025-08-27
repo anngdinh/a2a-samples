@@ -29,6 +29,10 @@ st.set_page_config(
 st.title("🤖 A2A Protocol Agent Chat")
 st.markdown("Chat with your agent using the A2A protocol")
 
+# Get URL parameters
+query_params = st.query_params
+default_agent_url = query_params.get("agent_url", "http://localhost:10000")
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -50,7 +54,7 @@ with st.sidebar:
 
     base_url = st.text_input(
         "Agent Base URL",
-        value="http://localhost:10000",
+        value=default_agent_url,
         help="The base URL of your A2A agent server"
     )
 
