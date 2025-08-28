@@ -46,6 +46,22 @@ spec:
         ports:
         - containerPort: 10000
           protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /.well-known/agent.json
+            port: 10000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /.well-known/agent.json
+            port: 10000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources: {}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
@@ -139,6 +155,22 @@ spec:
         ports:
         - containerPort: 8501
           protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources: {}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
