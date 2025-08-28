@@ -40,6 +40,9 @@ spec:
       - envFrom:
           - secretRef:
               name: a2a-agent-app
+        env:
+        - name: AGENT_URL
+          value: "https://a2a-agent-app.monitoring.annd2.pro/"
         image: ghcr.io/anngdinh/langgraph-agent-app:latest
         imagePullPolicy: Always
         name: a2a-agent-app

@@ -65,10 +65,19 @@ def main(host, port):
             tags=['currency conversion', 'currency exchange'],
             examples=['What is exchange rate between USD and GBP?'],
         )
+        
+        # Get agent URL from environment or construct from host:port
+        agent_url = os.getenv('AGENT_URL')
+        if not agent_url:
+            agent_url = f'http://{host}:{port}/'
+            logger.info(f'AGENT_URL not set, using default: {agent_url}')
+        else:
+            logger.info(f'Using AGENT_URL from environment: {agent_url}')
+        
         agent_card = AgentCard(
             name='Currency Agent',
             description='Helps with exchange rates for currencies',
-            url=f'http://{host}:{port}/',
+            url=agent_url,
             version='1.0.0',
             default_input_modes=CurrencyAgent.SUPPORTED_CONTENT_TYPES,
             default_output_modes=CurrencyAgent.SUPPORTED_CONTENT_TYPES,
