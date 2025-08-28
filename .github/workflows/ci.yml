@@ -1,0 +1,50 @@
+name: CI
+
+on: push
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Log in to the GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set variables
+        id: vars
+        run: |
+          branch_after_format=$(git rev-parse --abbrev-ref HEAD | sed 's/[^a-zA-Z0-9]/-/g')
+          echo $branch_after_format
+          echo "BRANCH_NAME=$branch_after_format" >> $GITHUB_ENV
+
+          calculatedSha=$(git rev-parse --short ${{ github.sha }})
+          echo $calculatedSha
+          echo "COMMIT_SHORT_SHA=$calculatedSha" >> $GITHUB_ENV
+
+      - name: Build and push Docker image UI
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          push: true
+          file: ./Containerfile.streamlit
+          tags: |
+            ghcr.io/anngdinh/langgraph-agent-ui:${{ github.sha }}
+      
+      - name: Build and push Docker image App
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          push: true
+          file: ./Containerfile
+          tags: |
+            ghcr.io/anngdinh/langgraph-agent-app:${{ github.sha }}
