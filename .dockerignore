@@ -43,6 +43,8 @@ app/
 test_client.py
 Containerfile
 Containerfile.streamlit
+docker-compose.yml
+Makefile
 *.log
 .env
 .env.local
@@ -58,3 +60,4 @@ docs/
 # Temporary files
 tmp/
 temp/
+k8s/

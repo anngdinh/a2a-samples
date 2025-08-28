@@ -40,7 +40,7 @@ spec:
       - envFrom:
           - secretRef:
               name: a2a-agent-app
-        image: vcr.vngcloud.vn/60108-annd2-ingress/langgraph-agent-app:v0.0.0
+        image: ghcr.io/anngdinh/langgraph-agent-app:latest
         imagePullPolicy: Always
         name: a2a-agent-app
         ports:
@@ -136,7 +136,7 @@ spec:
       - envFrom:
           - secretRef:
               name: a2a-agent-ui
-        image: vcr.vngcloud.vn/60108-annd2-ingress/langgraph-agent-ui:v0.0.0
+        image: ghcr.io/anngdinh/langgraph-agent-ui:latest
         imagePullPolicy: Always
         name: a2a-agent-ui
         ports:
