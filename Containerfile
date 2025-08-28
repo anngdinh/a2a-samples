@@ -1,42 +1,55 @@
-FROM registry.access.redhat.com/ubi8/python-312
+# Multi-stage build for smaller image
+# Stage 1: Builder
+FROM python:3.12-slim as builder
 
-# Set work directory
 WORKDIR /opt/app-root
 
-# Copy Python Project Files (Container context must be the `python` directory)
-COPY . /opt/app-root
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-USER root
+# Copy dependency files
+COPY pyproject.toml uv.lock README.md ./
 
-# Install system build dependencies and UV package manager
-RUN dnf -y update && dnf install -y gcc gcc-c++ \
- && pip install uv
-
-# Set environment variables for uv:
-# UV_COMPILE_BYTECODE=1: Compiles Python files to .pyc for faster startup
-# UV_LINK_MODE=copy: Ensures files are copied, not symlinked, which can avoid issues
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
-
-# Install dependencies using uv sync.
-# --frozen: Ensures uv respects the uv.lock file
-# --no-install-project: Prevents installing the project itself in this stage
-# --no-dev: Excludes development dependencies
-# --mount=type=cache: Leverages Docker's build cache for uv, speeding up repeated builds
-RUN --mount=type=cache,target=/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
-
-# Install the project
-RUN --mount=type=cache,target=/.cache/uv \
+# Install uv and create virtual environment with dependencies
+RUN pip install --no-cache-dir uv && \
+    uv venv .venv && \
     uv sync --frozen --no-dev
 
-# Allow non-root user to access the everything in app-root
-RUN chgrp -R root /opt/app-root/ && chmod -R g+rwx /opt/app-root/
+# Stage 2: Runtime
+FROM python:3.12-slim
 
-# Expose default port (change if needed)
-EXPOSE 10000
+WORKDIR /opt/app-root
+
+# Install only runtime dependencies (curl for health checks)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/app-root/.venv .venv
+
+# Copy application code and config files
+COPY app ./app
+COPY pyproject.toml uv.lock README.md ./
+
+# Set PATH to use venv
+ENV PATH="/opt/app-root/.venv/bin:$PATH"
+ENV PYTHONPATH="/opt/app-root:$PYTHONPATH"
+
+# Create non-root user
+RUN useradd -m -u 1001 appuser && \
+    chown -R appuser:appuser /opt/app-root
 
 USER 1001
 
-# Run the agent
-CMD uv run app --host 0.0.0.0
+EXPOSE 10000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:10000/.well-known/agent.json || exit 1
+
+# Run the agent directly with python
+CMD ["python", "-m", "app", "--host", "0.0.0.0"]
