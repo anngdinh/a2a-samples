@@ -133,10 +133,7 @@ spec:
         app: a2a-agent-ui
     spec:
       containers:
-      - envFrom:
-          - secretRef:
-              name: a2a-agent-ui
-        image: ghcr.io/anngdinh/langgraph-agent-ui:latest
+      - image: ghcr.io/anngdinh/langgraph-agent-ui:latest
         imagePullPolicy: Always
         name: a2a-agent-ui
         ports:

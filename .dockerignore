@@ -39,7 +39,6 @@ htmlcov/
 .DS_Store
 
 # Project specific
-app/
 test_client.py
 Containerfile
 Containerfile.streamlit
