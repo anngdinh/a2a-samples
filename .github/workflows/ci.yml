@@ -39,6 +39,7 @@ jobs:
           file: ./Containerfile.streamlit
           tags: |
             ghcr.io/anngdinh/langgraph-agent-ui:${{ github.sha }}
+            ghcr.io/anngdinh/langgraph-agent-ui:latest
       
       - name: Build and push Docker image App
         uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
@@ -48,3 +49,4 @@ jobs:
           file: ./Containerfile
           tags: |
             ghcr.io/anngdinh/langgraph-agent-app:${{ github.sha }}
+            ghcr.io/anngdinh/langgraph-agent-app:latest
