@@ -5,6 +5,7 @@ on: push
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    if: startsWith(github.event.head_commit.message, '[build]')
     permissions:
       contents: read
       packages: write
