@@ -35,9 +35,9 @@ def get_exchange_rate(
         A dictionary containing the exchange rate data, or an error message if
         the request fails.
     """
-    # sleep for 2 seconds to simulate a real API call
-    import time
-    time.sleep(2)
+    # # sleep for 2 seconds to simulate a real API call
+    # import time
+    # time.sleep(2)
     try:
         response = httpx.get(
             f'https://api.frankfurter.app/{currency_date}',
