@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -276,9 +277,16 @@ if connect_btn:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if message["role"] == "assistant":
+            if "duration" in message:
+                st.caption(f"⏱️ Response time: {message['duration']:.2f}s")
+            if "response_data" in message:
+                with st.expander("📊 Full Response"):
+                    st.json(message["response_data"])
 
 
 if prompt := st.chat_input("Type your message here...", disabled=not st.session_state.client_initialized):
+    start_time = time.time()
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
@@ -372,6 +380,7 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
             # Run streaming
             final_answer = asyncio.run(stream_response())
             assistant_message = final_answer or "Response received (no text content)"
+            response_data = None  # Streaming mode doesn't have full response data
 
         else:
             # Non-streaming mode - original behavior
@@ -477,9 +486,19 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                     if "assistant_message" not in locals():
                         assistant_message = "Error occurred"
 
+    # Calculate and display duration
+    duration = time.time() - start_time
+    st.caption(f"⏱️ Response time: {duration:.2f}s")
+
     if "assistant_message" in locals():
-        st.session_state.messages.append(
-            {"role": "assistant", "content": assistant_message})
+        message_data = {
+            "role": "assistant",
+            "content": assistant_message,
+            "duration": duration
+        }
+        if "response_data" in locals() and response_data:
+            message_data["response_data"] = response_data
+        st.session_state.messages.append(message_data)
 
 if not st.session_state.client_initialized:
     st.info(
