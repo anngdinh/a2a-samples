@@ -145,11 +145,18 @@ async def fetch_agent_card(base_url: str, auth_token: str = "") -> Optional[Agen
                         http_kwargs={'headers': auth_headers},
                     )
                     logger.info("Using extended agent card")
+                    # Update URL to match the fetch URL
+                    extended_card.url = base_url
                     return extended_card
                 except Exception as e:
                     logger.warning(f"Failed to fetch extended card: {e}")
+                    # Update URL to match the fetch URL
+                    public_card.url = base_url
                     return public_card
 
+            # Update URL to match the fetch URL
+            if public_card:
+                public_card.url = base_url
             return public_card
 
     except Exception as e:
