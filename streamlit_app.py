@@ -188,7 +188,7 @@ async def send_message_to_agent(
                 content=message
             )
             message_obj.message_id = uuid4().hex
-            
+
             if context_id:
                 message_obj.context_id = context_id
             if task_id:
@@ -204,14 +204,15 @@ async def send_message_to_agent(
 
                 async for event in client.send_message(message_obj):
                     response_parts.append(event)
-                    
+
                     # Handle different event types
                     if isinstance(event, Message):
                         # Direct message response
                         for part in event.parts:
                             if hasattr(part.root, 'text'):
                                 collected_text.append(part.root.text)
-                        final_response = event.model_dump(mode='json', exclude_none=True)
+                        final_response = event.model_dump(
+                            mode='json', exclude_none=True)
                     elif isinstance(event, tuple) and len(event) >= 1:
                         # Task update event
                         task = event[0]
@@ -219,15 +220,16 @@ async def send_message_to_agent(
                             for part in task.status.message.parts:
                                 if hasattr(part.root, 'text'):
                                     collected_text.append(part.root.text)
-                        
+
                         # Check for artifacts
                         if task.artifacts:
                             for artifact in task.artifacts:
                                 for part in artifact.parts:
                                     if hasattr(part.root, 'text'):
                                         collected_text.append(part.root.text)
-                        
-                        final_response = task.model_dump(mode='json', exclude_none=True)
+
+                        final_response = task.model_dump(
+                            mode='json', exclude_none=True)
 
                 if final_response:
                     # Add collected text to the final response
@@ -250,7 +252,7 @@ async def send_message_to_agent(
                 responses = []
                 async for event in client.send_message(message_obj):
                     responses.append(event)
-                
+
                 if responses:
                     # Return the last response
                     last_event = responses[-1]
@@ -259,7 +261,7 @@ async def send_message_to_agent(
                     elif isinstance(last_event, tuple) and len(last_event) >= 1:
                         task = last_event[0]
                         return {'result': task.model_dump(mode='json', exclude_none=True)}
-                
+
                 return {"error": "No response received"}
 
     except Exception as e:
@@ -320,7 +322,7 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                             content=prompt
                         )
                         message_obj.message_id = uuid4().hex
-                        
+
                         if st.session_state.context_id:
                             message_obj.context_id = st.session_state.context_id
                         if st.session_state.task_id:
@@ -329,8 +331,7 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                         if auth_token:
                             httpx_client.headers["Authorization"] = f"Bearer {auth_token}"
 
-                        streaming_text = ""
-                        final_text = ""
+                        lines = []
 
                         async for event in client.send_message(message_obj):
                             # Handle different event types
@@ -338,43 +339,44 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                                 # Direct message response
                                 for part in event.parts:
                                     if hasattr(part.root, 'text'):
-                                        final_text = part.root.text
-                                        message_placeholder.markdown(final_text)
-                                
+                                        lines.append(part.root.text)
+                                        message_placeholder.markdown(
+                                            "\n".join(lines))
+
                                 # Update context/task IDs if present
                                 if hasattr(event, 'context_id'):
                                     st.session_state.context_id = event.context_id
                                 if hasattr(event, 'task_id'):
                                     st.session_state.task_id = event.task_id
-                                    
+
                             elif isinstance(event, tuple) and len(event) >= 1:
                                 # Task update event
                                 task = event[0]
-                                
+
                                 # Update IDs
                                 if hasattr(task, 'context_id'):
                                     st.session_state.context_id = task.context_id
                                 if hasattr(task, 'id'):
                                     st.session_state.task_id = task.id
-                                
+
                                 # Check for text in status message
                                 if task.status and task.status.message:
                                     for part in task.status.message.parts:
                                         if hasattr(part.root, 'text'):
-                                            text = part.root.text
-                                            if not final_text:  # Stream if no final answer
-                                                streaming_text += text
-                                                message_placeholder.markdown(streaming_text)
-                                
+                                            lines.append(part.root.text)
+                                            message_placeholder.markdown(
+                                                "\n".join(lines))
+
                                 # Check for artifacts (final answer)
                                 if task.artifacts:
                                     for artifact in task.artifacts:
                                         for part in artifact.parts:
                                             if hasattr(part.root, 'text'):
-                                                final_text = part.root.text
-                                                message_placeholder.markdown(final_text)
+                                                lines.append(part.root.text)
+                                                message_placeholder.markdown(
+                                                    "\n".join(lines))
 
-                        return final_text or streaming_text
+                        return "\n".join(lines)
 
                 except Exception as e:
                     if 'terminal state' in str(e) or 'completed' in str(e):
