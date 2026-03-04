@@ -341,7 +341,7 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                                     if hasattr(part.root, 'text'):
                                         lines.append(part.root.text)
                                         message_placeholder.markdown(
-                                            "\n".join(lines))
+                                            "\n\n".join(lines))
 
                                 # Update context/task IDs if present
                                 if hasattr(event, 'context_id'):
@@ -365,7 +365,7 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                                         if hasattr(part.root, 'text'):
                                             lines.append(part.root.text)
                                             message_placeholder.markdown(
-                                                "\n".join(lines))
+                                                "\n\n".join(lines))
 
                                 # Check for artifacts (final answer)
                                 if task.artifacts:
@@ -374,9 +374,9 @@ if prompt := st.chat_input("Type your message here...", disabled=not st.session_
                                             if hasattr(part.root, 'text'):
                                                 lines.append(part.root.text)
                                                 message_placeholder.markdown(
-                                                    "\n".join(lines))
+                                                    "\n\n".join(lines))
 
-                        return "\n".join(lines)
+                        return "\n\n".join(lines)
 
                 except Exception as e:
                     if 'terminal state' in str(e) or 'completed' in str(e):
