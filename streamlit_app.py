@@ -1,10 +1,12 @@
 import asyncio
+import json
 import logging
 import time
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
 import streamlit as st
+import streamlit.components.v1 as components
 import httpx
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory, create_text_message_object
 from a2a.types import (
@@ -44,6 +46,9 @@ if "context_id" not in st.session_state:
 
 if "task_id" not in st.session_state:
     st.session_state.task_id = None
+
+if "input_history" not in st.session_state:
+    st.session_state.input_history = []
 
 if "agent_card" not in st.session_state:
     st.session_state.agent_card = None
@@ -294,7 +299,68 @@ for message in st.session_state.messages:
                     st.json(message["response_data"])
 
 
+_history_json = json.dumps(st.session_state.input_history)
+components.html(f"""
+<script>
+(function() {{
+    const history = {_history_json};
+    let historyIndex = history.length;
+    let savedInput = '';
+
+    function setInputValue(textarea, value) {{
+        const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype, 'value'
+        ).set;
+        setter.call(textarea, value);
+        textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    }}
+
+    function attachListener() {{
+        const textarea = window.parent.document.querySelector(
+            '[data-testid="stChatInputTextArea"]'
+        );
+        if (!textarea) {{
+            setTimeout(attachListener, 300);
+            return;
+        }}
+
+        if (textarea._historyAttached) return;
+        textarea._historyAttached = true;
+
+        textarea.addEventListener('keydown', function(e) {{
+            if (e.key === 'ArrowUp') {{
+                if (textarea.selectionStart !== 0) return;
+                e.preventDefault();
+                if (historyIndex === history.length) {{
+                    savedInput = textarea.value;
+                }}
+                if (historyIndex > 0) {{
+                    historyIndex--;
+                    setInputValue(textarea, history[historyIndex]);
+                }}
+            }} else if (e.key === 'ArrowDown') {{
+                if (textarea.selectionStart !== textarea.value.length) return;
+                e.preventDefault();
+                if (historyIndex < history.length - 1) {{
+                    historyIndex++;
+                    setInputValue(textarea, history[historyIndex]);
+                }} else if (historyIndex === history.length - 1) {{
+                    historyIndex = history.length;
+                    setInputValue(textarea, savedInput);
+                }}
+            }} else if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Alt') {{
+                historyIndex = history.length;
+            }}
+        }});
+    }}
+
+    attachListener();
+}})();
+</script>
+""", height=0)
+
 if prompt := st.chat_input("Type your message here...", disabled=not st.session_state.client_initialized):
+    st.session_state.input_history.append(prompt)
     start_time = time.time()
     st.session_state.messages.append({"role": "user", "content": prompt})
 
