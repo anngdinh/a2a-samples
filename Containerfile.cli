@@ -1,0 +1,35 @@
+# Lightweight CLI-only image (~60MB) — no agent server deps
+# Usage:
+#   docker run -it --rm a2a-cli http://your-agent:10000
+#   docker run -it --rm a2a-cli http://your-agent:10000 --token my-secret
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /opt/cli
+
+# Install only CLI dependencies (no langgraph, langchain, etc.)
+RUN pip install --no-cache-dir --target=/opt/cli/deps \
+    "click>=8.1.8" \
+    "httpx>=0.28.1" \
+    "a2a-sdk>=0.3.0" \
+    "rich>=13.0.0"
+
+FROM python:3.12-slim
+
+WORKDIR /opt/cli
+
+# Copy installed packages from builder
+COPY --from=builder /opt/cli/deps /opt/cli/deps
+
+# Copy only the CLI script
+COPY a2a_cli.py .
+
+ENV PYTHONPATH="/opt/cli/deps"
+ENV PYTHONUNBUFFERED=1
+
+# Create non-root user
+RUN useradd -m -u 1001 cliuser && \
+    chown -R cliuser:cliuser /opt/cli
+USER 1001
+
+ENTRYPOINT ["python", "a2a_cli.py"]
