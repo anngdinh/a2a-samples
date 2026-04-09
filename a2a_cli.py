@@ -194,10 +194,6 @@ async def _stream_once(session: Session, text: str) -> str:
 # ── Help & banner ─────────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "/help":  "Show this help",
-    "/info":  "Show agent card details",
-    "/new":   "Start a new conversation (reset context)",
-    "/clear": "Clear the screen",
     "/quit":  "Exit",
 }
 
@@ -228,43 +224,6 @@ def print_banner(card: AgentCard) -> None:
     ))
     console.print()
 
-
-def print_help() -> None:
-    console.print()
-    for cmd, desc in COMMANDS.items():
-        console.print(f"  [green]{cmd}[/green]  [dim]{desc}[/dim]")
-    console.print()
-
-
-def print_info(card: AgentCard) -> None:
-    console.print()
-    caps = card.capabilities
-    rows = [
-        ("name",        card.name or ""),
-        ("version",     getattr(card, "version", "") or ""),
-        ("url",         card.url or ""),
-        ("description", card.description or ""),
-        ("streaming",   str(caps.streaming) if caps else ""),
-    ]
-    info_lines = []
-    for key, val in rows:
-        if val:
-            info_lines.append(f"[dim]{key:<13}[/dim] {val}")
-    if card.skills:
-        info_lines.append(f"[dim]{'skills':<13}[/dim]")
-        for skill in card.skills:
-            example = ""
-            if skill.examples:
-                example = f"  [dim]e.g. {skill.examples[0]!r}[/dim]"
-            info_lines.append(f"  [cyan]•[/cyan] {skill.name}{example}")
-
-    console.print(Panel(
-        "\n".join(info_lines),
-        title=Text("Agent Card", style="bold cyan"),
-        border_style="dim",
-        padding=(0, 2),
-    ))
-    console.print()
 
 
 # ── Main REPL ─────────────────────────────────────────────────────────────────
@@ -298,24 +257,10 @@ async def repl(agent_url: str, auth_token: str) -> None:
         if not user_input:
             continue
 
-        # ── slash commands ─────────────────────────────────────────────────
-        if user_input.startswith("/"):
-            cmd = user_input.lower().split()[0]
-            if cmd in ("/quit", "/exit", "/q"):
-                break
-            elif cmd == "/help":
-                print_help()
-            elif cmd == "/info":
-                print_info(card)
-            elif cmd == "/new":
-                session.reset()
-                console.print("\n  [info]New conversation started.[/info]\n")
-            elif cmd == "/clear":
-                console.clear()
-                print_banner(card)
-            else:
-                console.print(f"\n  [error]Unknown command: {user_input}[/error]\n")
-            continue
+        # ── quit command ───────────────────────────────────────────────────
+        cmd = user_input.lower().split()[0]
+        if cmd in ("/quit", "/exit", "/q"):
+            break
 
         # ── send to agent ──────────────────────────────────────────────────
         console.print()
