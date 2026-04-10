@@ -17,7 +17,9 @@ from a2a.utils.constants import EXTENDED_AGENT_CARD_PATH
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.input import create_input
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 from rich.live import Live
@@ -30,11 +32,8 @@ from rich.theme import Theme
 # ── Rich console ──────────────────────────────────────────────────────────────
 
 theme = Theme({
-    "info":    "dim",
-    "working": "dim italic",
-    "error":   "bold red",
-    "success": "bold green",
-    "accent":  "bold cyan",
+    "info":  "dim",
+    "error": "bold red",
 })
 console = Console(theme=theme, highlight=False)
 
@@ -227,7 +226,7 @@ _PT_STYLE = PTStyle.from_dict({
     "prompt": "fg:ansibrightgreen bold",
 })
 
-_session = PromptSession(history=_history)
+_session = PromptSession(history=_history, erase_when_done=True)
 
 
 def _get_prompt() -> FormattedText:
@@ -254,6 +253,10 @@ async def read_input() -> str:
     def _newline(event):
         event.current_buffer.insert_text("\n")
 
+    @kb.add("escape")
+    def _clear(event):
+        event.current_buffer.reset()
+
     @kb.add("c-c")
     def _interrupt(event):
         raise KeyboardInterrupt()
@@ -270,6 +273,23 @@ async def read_input() -> str:
         style=_PT_STYLE,
         prompt_continuation=_prompt_continuation,
     )
+
+
+# ── ESC-to-cancel ─────────────────────────────────────────────────────────────
+
+async def _wait_for_esc() -> None:
+    """Resolve as soon as ESC is pressed."""
+    inp = create_input()
+    esc = asyncio.Event()
+
+    def _check():
+        for kp in inp.read_keys():
+            if kp.key == Keys.Escape:
+                esc.set()
+
+    with inp.raw_mode():
+        with inp.attach(_check):
+            await esc.wait()
 
 
 # ── Main REPL ─────────────────────────────────────────────────────────────────
@@ -305,25 +325,48 @@ async def repl(agent_url: str, auth_token: str) -> None:
         if cmd in ("/quit", "/exit", "/q"):
             break
 
-        # ── send to agent ──────────────────────────────────────────────────
+        # ── echo input in plain text, then send to agent (ESC cancels) ───────
+        console.print(f"[bold green]❯ {user_input}[/bold green]")
         console.print()
         start = time.monotonic()
 
-        try:
-            answer = await _stream_once(session, user_input)
-        except Exception as e:
-            err = str(e)
-            # stale/invalid task → reset task_id and retry once
-            if "terminal state" in err or "completed" in err or "does not exist" in err:
-                session.task_id = None
+        async def _run(text: str) -> str:
+            try:
+                return await _stream_once(session, text)
+            except Exception as e:
+                err = str(e)
+                if "terminal state" in err or "completed" in err or "does not exist" in err:
+                    session.task_id = None
+                    return await _stream_once(session, text)
+                raise
+
+        stream_task = asyncio.create_task(_run(user_input))
+        esc_task    = asyncio.create_task(_wait_for_esc())
+
+        done, _ = await asyncio.wait(
+            {stream_task, esc_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel whichever is still running
+        for t in (stream_task, esc_task):
+            if not t.done():
+                t.cancel()
                 try:
-                    answer = await _stream_once(session, user_input)
-                except Exception as e2:
-                    console.print(f"\n  [error]Error: {e2}[/error]\n")
-                    continue
-            else:
-                console.print(f"\n  [error]Error: {e}[/error]\n")
-                continue
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        if esc_task in done:
+            session.task_id = None
+            console.print("\n  [dim]Cancelled.[/dim]\n")
+            continue
+
+        try:
+            answer = stream_task.result()
+        except Exception as e:
+            console.print(f"\n  [error]Error: {e}[/error]\n")
+            continue
 
         elapsed = time.monotonic() - start
         if not answer.strip():
