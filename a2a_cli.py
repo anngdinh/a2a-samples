@@ -3,7 +3,7 @@
 
 import asyncio
 import os
-import readline
+import shutil
 import sys
 import time
 from typing import Optional
@@ -14,6 +14,11 @@ import httpx
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory, create_text_message_object
 from a2a.types import AgentCard, Message, Task, TransportProtocol
 from a2a.utils.constants import EXTENDED_AGENT_CARD_PATH
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -34,22 +39,10 @@ theme = Theme({
 console = Console(theme=theme, highlight=False)
 
 
-# ── Readline history ──────────────────────────────────────────────────────────
+# ── Input history ─────────────────────────────────────────────────────────────
 
 HISTORY_FILE = os.path.expanduser("~/.a2a_cli_history")
-
-def setup_readline() -> None:
-    try:
-        readline.read_history_file(HISTORY_FILE)
-    except FileNotFoundError:
-        pass
-    readline.set_history_length(500)
-
-def save_readline() -> None:
-    try:
-        readline.write_history_file(HISTORY_FILE)
-    except Exception:
-        pass
+_history = FileHistory(HISTORY_FILE)
 
 
 # ── Agent card ────────────────────────────────────────────────────────────────
@@ -194,7 +187,8 @@ async def _stream_once(session: Session, text: str) -> str:
 # ── Help & banner ─────────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "/quit":  "Exit",
+    "/quit":       "Exit",
+    "Alt+Enter":   "New line",
 }
 
 def print_banner(card: AgentCard) -> None:
@@ -226,6 +220,58 @@ def print_banner(card: AgentCard) -> None:
 
 
 
+# ── Bordered input box ────────────────────────────────────────────────────────
+
+_PT_STYLE = PTStyle.from_dict({
+    "border": "fg:ansibrightcyan",
+    "prompt": "fg:ansibrightgreen bold",
+})
+
+_session = PromptSession(history=_history)
+
+
+def _get_prompt() -> FormattedText:
+    width = shutil.get_terminal_size().columns
+    return FormattedText([
+        ("class:border", "─" * width + "\n"),
+        ("class:prompt", "❯ "),
+    ])
+
+
+def _prompt_continuation(width: int, line_number: int, wrap_count: int) -> FormattedText:
+    return FormattedText([("class:prompt", "  ")])
+
+
+async def read_input() -> str:
+    """Top-border input. Enter=submit, Alt+Enter=newline. Paste multi-line freely."""
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _submit(event):
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("escape", "enter")   # Alt+Enter
+    def _newline(event):
+        event.current_buffer.insert_text("\n")
+
+    @kb.add("c-c")
+    def _interrupt(event):
+        raise KeyboardInterrupt()
+
+    @kb.add("c-d")
+    def _eof(event):
+        if not event.current_buffer.text:
+            raise EOFError()
+
+    return await _session.prompt_async(
+        _get_prompt,
+        multiline=True,
+        key_bindings=kb,
+        style=_PT_STYLE,
+        prompt_continuation=_prompt_continuation,
+    )
+
+
 # ── Main REPL ─────────────────────────────────────────────────────────────────
 
 async def repl(agent_url: str, auth_token: str) -> None:
@@ -242,14 +288,11 @@ async def repl(agent_url: str, auth_token: str) -> None:
         sys.exit(1)
 
     session = Session(card, auth_token)
-    setup_readline()
     print_banner(card)
 
     while True:
         try:
-            # Use builtin input() for readline history/arrow-key support.
-            # Wrap ANSI codes in \001/\002 so readline calculates width correctly.
-            user_input = input("\001\033[1m\033[32m\002❯ \001\033[0m\002").strip()
+            user_input = (await read_input()).strip()
         except (EOFError, KeyboardInterrupt):
             console.print()
             break
@@ -290,7 +333,6 @@ async def repl(agent_url: str, auth_token: str) -> None:
         console.print(f"  [dim]⏱  {elapsed:.2f}s[/dim]")
         console.print()
 
-    save_readline()
     console.print("\n  [dim]Bye.[/dim]\n")
 
 
