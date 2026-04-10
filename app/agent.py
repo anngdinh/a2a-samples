@@ -1,3 +1,4 @@
+import json
 import os
 
 from collections.abc import AsyncIterable
@@ -99,32 +100,85 @@ class CurrencyAgent:
             checkpointer=memory,
             prompt=self.SYSTEM_INSTRUCTION,
             response_format=(self.FORMAT_INSTRUCTION, ResponseFormat),
+            interrupt_before=['tools'],
         )
 
+    _APPROVE = {'yes', 'y', 'approve', 'approved', 'ok'}
+
+    @staticmethod
+    def _format_tool_calls(tool_calls: list[dict]) -> str:
+        blocks = []
+        for tc in tool_calls:
+            args_json = json.dumps(tc['args'], indent=2)
+            blocks.append(
+                f'**Tool:** `{tc["name"]}`  \n'
+                f'**ID:** `{tc["id"]}`  \n'
+                f'**Args:**\n```json\n{args_json}\n```'
+            )
+        return '\n\n'.join(blocks)
+
     async def astream(self, query, context_id) -> AsyncIterable[dict[str, Any]]:
-        inputs = {'messages': [('user', query)]}
         config = {'configurable': {'thread_id': context_id}}
 
+        # ── Detect resume from tool-approval interrupt ─────────────────────
+        saved = self.graph.get_state(config)
+        pending_tools = bool(saved.values) and 'tools' in (saved.next or [])
+
+        if pending_tools:
+            if query.strip().lower() in self._APPROVE:
+                inputs = None  # resume → tools will execute
+            else:
+                # Rejection: inject ToolMessages and resume past the tools node
+                last_ai = saved.values['messages'][-1]
+                rejection = [
+                    ToolMessage(
+                        content='Tool execution rejected by user.',
+                        tool_call_id=tc['id'],
+                    )
+                    for tc in last_ai.tool_calls
+                ]
+                await self.graph.aupdate_state(
+                    config, {'messages': rejection}, as_node='tools'
+                )
+                inputs = None
+        else:
+            inputs = {'messages': [('user', query)]}
+
+        # ── Stream graph ───────────────────────────────────────────────────
         async for item in self.graph.astream(inputs, config, stream_mode='values'):
             message = item['messages'][-1]
-            if (
-                isinstance(message, AIMessage)
-                and message.tool_calls
-                and len(message.tool_calls) > 0
-            ):
+            if isinstance(message, AIMessage) and message.tool_calls:
                 yield {
                     'is_task_complete': False,
                     'require_user_input': False,
-                    'content': 'Looking up the exchange rates...',
+                    'content': 'Preparing tool call…',
                 }
             elif isinstance(message, ToolMessage):
                 yield {
                     'is_task_complete': False,
                     'require_user_input': False,
-                    'content': 'Processing the exchange rates...',
+                    'content': 'Processing exchange rates…',
                 }
 
-        yield self.get_agent_response(config)
+        # ── Check for tool-approval interrupt ──────────────────────────────
+        final = self.graph.get_state(config)
+        if 'tools' in (final.next or []):
+            last_ai = final.values['messages'][-1]
+            tool_calls = [
+                {'id': tc['id'], 'name': tc['name'], 'args': tc['args']}
+                for tc in last_ai.tool_calls
+            ]
+            content = (
+                'Approve tool execution? Reply **yes** to proceed or **no** to cancel.\n\n'
+                + self._format_tool_calls(tool_calls)
+            )
+            yield {
+                'is_task_complete': False,
+                'require_user_input': True,
+                'content': content,
+            }
+        else:
+            yield self.get_agent_response(config)
 
     def get_agent_response(self, config):
         current_state = self.graph.get_state(config)
