@@ -259,12 +259,12 @@ async def read_input() -> str:
 
     @kb.add("c-c")
     def _interrupt(event):
-        raise KeyboardInterrupt()
+        event.current_buffer.reset()
 
     @kb.add("c-d")
     def _eof(event):
         if not event.current_buffer.text:
-            raise EOFError()
+            event.app.exit(exception=EOFError())
 
     return await _session.prompt_async(
         _get_prompt,
