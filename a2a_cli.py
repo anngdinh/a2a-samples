@@ -186,6 +186,7 @@ async def _stream_once(session: Session, text: str) -> str:
 # ── Help & banner ─────────────────────────────────────────────────────────────
 
 COMMANDS = {
+    "/new":        "New conversation",
     "/quit":       "Exit",
     "Alt+Enter":   "New line",
 }
@@ -320,10 +321,15 @@ async def repl(agent_url: str, auth_token: str) -> None:
         if not user_input:
             continue
 
-        # ── quit command ───────────────────────────────────────────────────
+        # ── built-in commands ──────────────────────────────────────────────
         cmd = user_input.lower().split()[0]
         if cmd in ("/quit", "/exit", "/q"):
             break
+
+        if cmd == "/new":
+            session.reset()
+            console.print("\n  [dim]New conversation started.[/dim]\n")
+            continue
 
         # ── echo input in plain text, then send to agent (ESC cancels) ───────
         console.print(f"[bold green]❯ {user_input}[/bold green]")
