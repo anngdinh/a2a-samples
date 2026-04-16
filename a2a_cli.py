@@ -82,10 +82,10 @@ async def fetch_agent_card(base_url: str, auth_token: str = "") -> Optional[Agen
 class Session:
     """Holds conversation state across turns."""
 
-    def __init__(self, agent_card: AgentCard, auth_token: str = "") -> None:
+    def __init__(self, agent_card: AgentCard, auth_token: str = "", context_id: str = "") -> None:
         self.agent_card = agent_card
         self.auth_token = auth_token
-        self.context_id: str = str(uuid4())
+        self.context_id: str = context_id or str(uuid4())
         self.task_id: Optional[str] = None
 
     def reset(self) -> None:
@@ -186,7 +186,7 @@ async def _stream_once(session: Session, text: str) -> str:
 # ── Help & banner ─────────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "/new":        "New conversation",
+    "/new [id]":   "New conversation (or switch to context id)",
     "/quit":       "Exit",
     "Alt+Enter":   "New line",
 }
@@ -295,7 +295,7 @@ async def _wait_for_esc() -> None:
 
 # ── Main REPL ─────────────────────────────────────────────────────────────────
 
-async def repl(agent_url: str, auth_token: str) -> None:
+async def repl(agent_url: str, auth_token: str, context_id: str = "") -> None:
     # Fetch agent card
     console.print(f"\n  [info]Connecting to {agent_url} …[/info]")
     try:
@@ -308,8 +308,10 @@ async def repl(agent_url: str, auth_token: str) -> None:
         console.print("\n  [error]Could not fetch agent card. Is the server running?[/error]\n")
         sys.exit(1)
 
-    session = Session(card, auth_token)
+    session = Session(card, auth_token, context_id)
     print_banner(card)
+    if context_id:
+        console.print(f"  [dim]Resuming context: {session.context_id}[/dim]\n")
 
     while True:
         try:
@@ -327,8 +329,14 @@ async def repl(agent_url: str, auth_token: str) -> None:
             break
 
         if cmd == "/new":
-            session.reset()
-            console.print("\n  [dim]New conversation started.[/dim]\n")
+            parts = user_input.split(maxsplit=1)
+            if len(parts) > 1:
+                session.context_id = parts[1].strip()
+                session.task_id = None
+                console.print(f"\n  [dim]Switched to context: {session.context_id}[/dim]\n")
+            else:
+                session.reset()
+                console.print(f"\n  [dim]New conversation started. context: {session.context_id}[/dim]\n")
             continue
 
         # ── echo input in plain text, then send to agent (ESC cancels) ───────
@@ -391,7 +399,9 @@ async def repl(agent_url: str, auth_token: str) -> None:
 @click.argument("agent_url", default="", required=False)
 @click.option("--token", "-t", default="", envvar="A2A_TOKEN",
               help="Bearer token for authenticated agents (or set A2A_TOKEN env var).")
-def main(agent_url: str, token: str) -> None:
+@click.option("--context-id", "-c", default="", envvar="A2A_CONTEXT_ID",
+              help="Resume a specific context ID instead of starting a new one.")
+def main(agent_url: str, token: str, context_id: str) -> None:
     """Interactive CLI for A2A protocol agents.
 
     \b
@@ -409,7 +419,7 @@ def main(agent_url: str, token: str) -> None:
             click.echo("No URL provided.", err=True)
             sys.exit(1)
 
-    asyncio.run(repl(agent_url, token))
+    asyncio.run(repl(agent_url, token, context_id))
 
 
 if __name__ == "__main__":
